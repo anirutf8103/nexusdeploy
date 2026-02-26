@@ -103,6 +103,20 @@ foreach ($requiredFiles as $file => $defaultContent) {
     </div>
 </div>
 
+<div class="bg-dark-panel rounded-xl border border-dark-border shadow-lg mb-8 relative" style="background-color: #111; background-image: radial-gradient(circle, #333 1px, transparent 1px); background-size: 20px 20px; overflow: hidden;">
+    <div class="px-6 pt-6 mb-2 relative z-10">
+        <h2 class="text-white font-semibold flex items-center gap-2">
+            <i class="ph ph-share-network text-accent"></i> Infrastructure & Deployment Pipeline Topology
+        </h2>
+    </div>
+    <div class="p-6 h-[500px] w-full relative z-10" id="topology-canvas">
+        <div id="topology-loading" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+            <i class="ph ph-spinner-gap animate-spin text-3xl mb-2 text-primary"></i>
+            <p>Loading topology map...</p>
+        </div>
+    </div>
+</div>
+
 <div class="bg-dark-panel rounded-xl border border-dark-border shadow-lg overflow-hidden">
     <div class="p-5 border-b border-dark-border flex justify-between items-center bg-gray-900/40">
         <h2 class="text-white font-semibold flex items-center gap-2"><i class="ph ph-activity text-primary animate-pulse"></i> Recent Activity</h2>
@@ -129,6 +143,7 @@ foreach ($requiredFiles as $file => $defaultContent) {
     </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/dist/vis-network.min.js"></script>
 <script src="assets/js/dashboard.js"></script>
 
 <?php include 'includes/footer.php'; ?>

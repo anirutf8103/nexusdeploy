@@ -183,4 +183,215 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         }
     }
+
+    // --- Topology Visualizer ---
+    const topoContainer = document.getElementById('topology-canvas');
+    if (topoContainer && window.vis) {
+        try {
+            const topoRes = await fetch('api/get_topology.php');
+            const topoData = await topoRes.json();
+
+            document.getElementById('topology-loading')?.remove();
+
+            const nodes = new vis.DataSet(topoData.nodes.map(n => {
+                let color = n.group === 'project' ? '#3b82f6' : '#6366f1';
+                let border = '#ffffff'; // Thicker white border by default
+
+                // Status badge representation (Green/Red border)
+                if (n.group === 'server') {
+                    if (n.status === 'Success') border = '#10b981';
+                    else if (n.status === 'Failed') border = '#ef4444';
+                }
+
+                // SVG Icons with background shapes
+                let svgIcon;
+                // Encode colors manually for SVG injection: %23 is the hash symbol '#'
+                if (n.group === 'project') {
+                    // ph-globe SVG inside a Green Circle
+                    svgIcon = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 256 256">
+                        <circle cx="128" cy="128" r="128" fill="#10b981"/> <!-- Green Circle -->
+                        <path fill="#ffffff" d="M128,40A88,88,0,1,0,216,128,88.1,88.1,0,0,0,128,40ZM95.27,192.42A72.1,72.1,0,0,1,128,56a71.74,71.74,0,0,1,9.81.68,145.45,145.45,0,0,1,28.27,34H89.92A145.45,145.45,0,0,1,118.19,56.68a71.69,71.69,0,0,1,36.54,135.74A145.45,145.45,0,0,1,126.46,158.3A145.45,145.45,0,0,1,95.27,192.42ZM56.33,112h31a153.29,153.29,0,0,0-1.28,32H56.33A72.3,72.3,0,0,1,56.33,112ZM73.7,160H88a129.5,129.5,0,0,0,23.11,39A72.18,72.18,0,0,1,73.7,160Zm14.3-64H73.7A72.18,72.18,0,0,1,111.11,57,129.5,129.5,0,0,0,88,96Zm15.21,48h50.18a135.5,135.5,0,0,0,.91-32H102.4A135.5,135.5,0,0,0,103.21,144Zm24.79,31.7A129.5,129.5,0,0,0,150.84,160H105.16A129.5,129.5,0,0,0,128,175.7ZM144.89,57a72.18,72.18,0,0,1,37.41,39H168A129.5,129.5,0,0,0,144.89,57ZM168,160h14.3a72.18,72.18,0,0,1-37.41,39A129.5,129.5,0,0,0,168,160Zm18.3,10.6a88.16,88.16,0,0,0,13.37-26.6H169.93A153.29,153.29,0,0,1,171.21,112h28.47a88.16,88.16,0,0,0-13.37-26.6Z"/>
+                    </svg>
+                    `.trim().replace(/\n/g, '').replace(/\s+/g, ' ');
+                } else {
+                    // ph-hard-drives SVG inside a Blue Square with rounded corners
+                    svgIcon = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 256 256">
+                        <rect width="256" height="256" rx="48" fill="#3b82f6"/> <!-- Blue Rounded Square -->
+                        <path fill="#ffffff" d="M192,56H64A16,16,0,0,0,48,72v32a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V72A16,16,0,0,0,192,56Zm0,48H64V72H192v32ZM192,136H64a16,16,0,0,0-16,16v32a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V152A16,16,0,0,0,192,136Zm0,48H64V152H192v32ZM88,88a8,8,0,1,1,8,8A8,8,0,0,1,88,88Zm0,80a8,8,0,1,1,8,8A8,8,0,0,1,88,168Z"/>
+                    </svg>
+                    `.trim().replace(/\n/g, '').replace(/\s+/g, ' ');
+                }
+
+                let url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgIcon);
+
+                return {
+                    id: n.id,
+                    label: n.label, // Remove bold emoji from label
+                    group: n.group,
+                    shape: 'image',
+                    image: url,
+                    margin: { top: 12, bottom: 12, left: 16, right: 16 },
+                    color: {
+                        background: '#1e293b',
+                        border: border,
+                        highlight: {
+                            background: '#334155',
+                            border: border
+                        },
+                        hover: {
+                            background: '#334155',
+                            border: border
+                        }
+                    },
+                    font: {
+                        color: '#f8fafc',
+                        face: 'Inter, sans-serif',
+                        size: 13,
+                        multi: 'html'
+                    },
+                    borderWidth: 2,
+                    borderWidthSelected: 4,
+                    shadow: {
+                        enabled: true,
+                        color: 'rgba(0,0,0,0.6)',
+                        size: 8,
+                        x: 0,
+                        y: 4
+                    }
+                };
+            }));
+
+            const edges = new vis.DataSet(topoData.edges.map(e => {
+                let label = e.has_webhook ? '⚡ Webhook' : '';
+                return {
+                    from: e.from,
+                    to: e.to,
+                    arrows: 'to',
+                    color: {
+                        color: '#475569',
+                        highlight: '#3b82f6',
+                        hover: '#3b82f6'
+                    },
+                    smooth: {
+                        type: 'cubicBezier', // Let visjs figure out best curve automatically without hierarchy limitations
+                        forceDirection: 'none',
+                        roundness: 0.5
+                    },
+                    label: label,
+                    font: {
+                        color: '#ffffff',
+                        size: 11,
+                        background: 'none',
+                        strokeWidth: 3,
+                        strokeColor: '#1e293b' // Dark background stroke for high visibility
+                    }
+                };
+            }));
+
+            const data = { nodes, edges };
+            const options = {
+                physics: {
+                    enabled: true,
+                    solver: 'forceAtlas2Based',
+                    forceAtlas2Based: {
+                        gravitationalConstant: -150, // Push harder
+                        centralGravity: 0.005, // Looser center focus
+                        springConstant: 0.05,
+                        springLength: 250, // Longer edges
+                        damping: 0.4,
+                        avoidOverlap: 1 // Crucial for no overlapping
+                    }
+                },
+                layout: {
+                    randomSeed: 8 // Give a new seed to try spreading better
+                },
+                interaction: {
+                    hover: true,
+                    tooltipDelay: 200,
+                    zoomView: true,
+                    dragView: true
+                }
+            };
+
+            const network = new vis.Network(topoContainer, data, options);
+
+            // Interactive Highlighting on Hover
+            network.on("hoverNode", function (params) {
+                network.canvas.body.container.style.cursor = 'pointer';
+                const selectedNode = params.node;
+                const connectedNodesNum = network.getConnectedNodes(selectedNode);
+
+                // Blur other nodes
+                let allNodes = nodes.get({ returnType: 'Object' });
+                let updateArray = [];
+                for (let nodeId in allNodes) {
+                    if (nodeId == selectedNode || connectedNodesNum.includes(nodeId)) {
+                        updateArray.push({ id: nodeId, hidden: false, opacity: 1 });
+                    } else {
+                        updateArray.push({ id: nodeId, opacity: 0.2 });
+                    }
+                }
+
+                // Change colors due to opacity override bug in some vis versions
+                nodes.update(updateArray.map(n => {
+                    let ogNode = allNodes[n.id];
+                    if (n.opacity === 0.2) {
+                        return { id: n.id, color: { background: 'rgba(30,41,59,0.2)', border: 'rgba(255,255,255,0.2)' }, font: { color: 'rgba(248,250,252,0.2)' } };
+                    } else {
+                        // Restore colors
+                        let border = '#ffffff';
+                        if (ogNode.group === 'server') {
+                            if (ogNode.status === 'Success') border = '#10b981';
+                            else if (ogNode.status === 'Failed') border = '#ef4444';
+                        }
+                        return { id: n.id, color: { background: '#1e293b', border: border }, font: { color: '#f8fafc' } };
+                    }
+                }));
+
+                // Edges fade
+                let allEdges = edges.get({ returnType: 'Object' });
+                let connectedEdges = network.getConnectedEdges(selectedNode);
+                let updateEdges = [];
+                for (let edgeId in allEdges) {
+                    if (connectedEdges.includes(edgeId)) {
+                        updateEdges.push({ id: edgeId, color: { color: '#3b82f6' } });
+                    } else {
+                        updateEdges.push({ id: edgeId, color: { color: 'rgba(71,85,105,0.2)' } });
+                    }
+                }
+                edges.update(updateEdges);
+            });
+
+            network.on("blurNode", function (params) {
+                network.canvas.body.container.style.cursor = 'default';
+
+                // Restore all nodes and edges
+                let allNodes = nodes.get({ returnType: 'Object' });
+                let updateArray = [];
+                for (let nodeId in allNodes) {
+                    let ogNode = allNodes[nodeId];
+                    let border = '#ffffff';
+                    if (ogNode.group === 'server') {
+                        if (ogNode.status === 'Success') border = '#10b981';
+                        else if (ogNode.status === 'Failed') border = '#ef4444';
+                    }
+                    updateArray.push({ id: nodeId, color: { background: '#1e293b', border: border }, font: { color: '#f8fafc' } });
+                }
+                nodes.update(updateArray);
+
+                let allEdges = edges.get({ returnType: 'Object' });
+                let updateEdges = [];
+                for (let edgeId in allEdges) {
+                    updateEdges.push({ id: edgeId, color: { color: '#475569' } });
+                }
+                edges.update(updateEdges);
+            });
+
+        } catch (e) {
+            console.error('Topology generation failed:', e);
+            document.getElementById('topology-loading').innerHTML = '<p class="text-red-400">Failed to load topology map.</p>';
+        }
+    }
 });

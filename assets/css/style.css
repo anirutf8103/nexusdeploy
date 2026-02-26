@@ -1,0 +1,81 @@
+@layer utilities {
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: #0f172a; 
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #334155; 
+        border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #475569; 
+    }
+    
+    .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+    }
+    .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+}
+
+.glass-panel {
+    background: rgba(30, 41, 59, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glow-text {
+    text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+}
+
+.glow-border:focus {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+    border-color: #3b82f6;
+}
+
+[v-cloak] {
+    display: none;
+}
+
+/* Select2 Dark Mode Tweaks */
+.select2-container--default .select2-selection--single {
+    background-color: #0f172a !important; /* dark bg */
+    border: 1px solid #334155 !important;
+    border-radius: 0.5rem !important;
+    height: 42px !important;
+    display: flex;
+    align-items: center;
+}
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+    color: #f3f4f6 !important; /* gray-100 */
+    line-height: normal !important;
+    padding-left: 12px;
+}
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 40px !important;
+    right: 8px !important;
+}
+.select2-dropdown {
+    background-color: #1e293b !important;
+    border: 1px solid #334155 !important;
+    color: #f3f4f6 !important;
+}
+.select2-container--default .select2-search--dropdown .select2-search__field {
+    background-color: #0f172a !important;
+    border: 1px solid #334155 !important;
+    color: #f3f4f6 !important;
+    border-radius: 0.25rem;
+}
+.select2-container--default .select2-results__option--selected {
+    background-color: #3b82f6 !important;
+}
+.select2-container--default .select2-results__option--highlighted.select2-results__option--selectable {
+    background-color: #334155 !important;
+    color: white !important;
+}

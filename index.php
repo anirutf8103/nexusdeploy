@@ -1,3 +1,25 @@
+<?php
+// ฟังก์ชันเช็คและสร้างไฟล์ JSON เริ่มต้น (ถ้ายังไม่มี)
+$requiredFiles = [
+    'data/projects.json' => '[]',      // ค่าเริ่มต้นเป็น Array เปล่า
+    'data/servers.json' => '[]',
+    'data/logs.json' => '[]',
+    'data/state.json' => '{}'    // ค่าเริ่มต้นเป็น Object เปล่า
+];
+
+// ถ้าไม่มีโฟลเดอร์ data ให้สร้างโฟลเดอร์ก่อน (เผื่อหลุด)
+if (!is_dir(__DIR__ . '/data')) {
+    mkdir(__DIR__ . '/data', 0777, true);
+}
+
+// วนลูปเช็คไฟล์ ถ้าไม่มีให้สร้างขึ้นมาพร้อมค่าเริ่มต้น
+foreach ($requiredFiles as $file => $defaultContent) {
+    $filePath = __DIR__ . '/' . $file;
+    if (!file_exists($filePath)) {
+        file_put_contents($filePath, $defaultContent);
+    }
+}
+?>
 <?php include 'includes/header.php'; ?>
 
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

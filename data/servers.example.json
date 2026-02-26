@@ -1,0 +1,20 @@
+[
+  {
+    "id": "srv_1708900001",
+    "name": "Production Server (Main Website)",
+    "host": "ftp.your-production-domain.com",
+    "port": 21,
+    "user": "admin_prod",
+    "pass": "your_ftp_password_here",
+    "webhook_url": "https://api.yourdomain.com/deploy-hook?key=secret_token"
+  },
+  {
+    "id": "srv_1708900002",
+    "name": "Staging Server (Test Environment)",
+    "host": "ftp.staging-domain.com",
+    "port": 21,
+    "user": "admin_stage",
+    "pass": "your_ftp_password_here",
+    "webhook_url": ""
+  }
+]

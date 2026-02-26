@@ -4,7 +4,7 @@
 
 NEXUSDEPLOY is a robust local deployment engine designed to replace traditional FTP clients like FileZilla. It solves the deployment bottleneck by utilizing concurrent FTP connections and smart incremental file synchronization, turning a 5-minute upload process into a sub-second task.
 
-
+<img width="1283" height="1041" alt="ภาพถ่ายหน้าจอ 2569-02-26 เวลา 20 35 41" src="https://github.com/user-attachments/assets/c75c4d67-304a-404c-8907-62ca411960a9" />
 
 ## 🔥 Why NEXUSDEPLOY?
 Uploading hundreds of files via standard FTP clients is slow due to synchronous, one-by-one file transfers and redundant directory checks. NEXUSDEPLOY tackles this by acting as a local command center: it scans your project, identifies only the modified files, and shoots them to your servers simultaneously using `curl_multi_init`.

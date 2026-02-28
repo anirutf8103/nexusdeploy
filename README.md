@@ -32,7 +32,7 @@ Because NEXUSDEPLOY needs absolute access to read your local project directories
 ### Installation
 1. Clone this repository into your local web server's root directory:
    ```bash
-   git clone [https://github.com/your-username/nexusdeploy.git](https://github.com/your-username/nexusdeploy.git)
+   git clone [https://github.com/anirutf8103/nexusdeploy.git](https://github.com/anirutf8103/nexusdeploy.git)
 
 2. Navigate to the project folder in your browser (e.g., http://localhost/nexusdeploy).
 

@@ -167,8 +167,6 @@ if ($action === 'dry-run' && $method === 'GET') {
 
     $localBase = rtrim($localPathStr, '/\\');
 
-    $serverHandles = [];
-
     $startTime = microtime(true);
     $results = [];
     $serverStats = [];
@@ -204,24 +202,27 @@ if ($action === 'dry-run' && $method === 'GET') {
         $ftpUrl = 'ftp://' . $server['host'] . ':' . $port . $remoteBase;
         $remoteFileUrl = rtrim($ftpUrl, '/') . '/' . str_replace('\\', '/', $filePath);
 
-        // Fetch or create persistent connection handle for this specific server
-        if (!isset($serverHandles[$sId])) {
-            $ch = curl_init();
-            $credentials = $server['username'] . ':' . ($server['password'] ?? '');
-            curl_setopt($ch, CURLOPT_USERPWD, $credentials);
-            curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
-            curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-            curl_setopt($ch, CURLOPT_UPLOAD, 1);
-            $serverHandles[$sId] = $ch;
-        }
-        $ch = $serverHandles[$sId];
-
         $fp = fopen($localFile, 'r');
+        if (!$fp) {
+            $results[] = ['status' => 'failed', 'project_name' => $qItem['project_name'], 'path' => $filePath, 'error' => 'Could not open local file'];
+            $serverStats[$sId]['failed']++;
+            continue;
+        }
+
+        $ch = curl_init();
+        $credentials = $server['username'] . ':' . ($server['password'] ?? '');
         curl_setopt($ch, CURLOPT_URL, $remoteFileUrl);
+        curl_setopt($ch, CURLOPT_USERPWD, $credentials);
+        curl_setopt($ch, CURLOPT_UPLOAD, 1);
         curl_setopt($ch, CURLOPT_INFILE, $fp);
         curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localFile));
+        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
+        
+        // Secure FTPS settings
+        curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 
         $ext = pathinfo($localFile, PATHINFO_EXTENSION);
         $asciiExts = ['txt', 'html', 'css', 'js', 'json', 'php', 'md', 'xml'];
@@ -233,7 +234,9 @@ if ($action === 'dry-run' && $method === 'GET') {
 
         $result = curl_exec($ch);
         $error = curl_error($ch);
+        
         fclose($fp);
+        curl_close($ch);
 
         if ($result !== false) {
             $results[] = [
@@ -256,11 +259,6 @@ if ($action === 'dry-run' && $method === 'GET') {
             ];
             $serverStats[$sId]['failed']++;
         }
-    }
-
-    // Close all persistent server handles
-    foreach ($serverHandles as $ch) {
-        curl_close($ch);
     }
 
     $stateStore->write($fullState);

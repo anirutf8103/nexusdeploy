@@ -143,18 +143,7 @@ if ($action === 'dry-run' && $method === 'GET') {
 
     $credentials = $server['username'] . ':' . ($server['password'] ?? '');
     
-    // We will use CURLOPT_USERPWD instead of placing it in URL to avoid URL encoding issues with special chars
-    $ch = curl_init();
     $startTime = microtime(true);
-    
-    // Set baseline options for connection reuse
-    curl_setopt($ch, CURLOPT_USERPWD, $credentials);
-    curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
-    curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-    curl_setopt($ch, CURLOPT_UPLOAD, 1);
-
     $successList = [];
     $failedList = [];
     $fullState = $stateStore->read();
@@ -168,10 +157,24 @@ if ($action === 'dry-run' && $method === 'GET') {
 
         $remoteFileUrl = rtrim($ftpUrl, '/') . '/' . str_replace('\\', '/', $filePath);
         $fp = fopen($localFile, 'r');
+        if (!$fp) {
+            $failedList[] = ['path' => $filePath, 'error' => 'Could not open local file for reading'];
+            continue;
+        }
 
+        $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $remoteFileUrl);
+        curl_setopt($ch, CURLOPT_USERPWD, $credentials);
+        curl_setopt($ch, CURLOPT_UPLOAD, 1);
         curl_setopt($ch, CURLOPT_INFILE, $fp);
         curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localFile));
+        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
+        
+        // Secure FTPS settings
+        curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 
         // Ensure proper transfer mode
         $ext = pathinfo($localFile, PATHINFO_EXTENSION);
@@ -184,7 +187,9 @@ if ($action === 'dry-run' && $method === 'GET') {
 
         $result = curl_exec($ch);
         $error = curl_error($ch);
+        
         fclose($fp);
+        curl_close($ch);
 
         if ($result !== false) {
             $successList[] = $filePath;
@@ -199,8 +204,6 @@ if ($action === 'dry-run' && $method === 'GET') {
             ];
         }
     }
-    
-    curl_close($ch);
 
     $stateStore->write($fullState);
 

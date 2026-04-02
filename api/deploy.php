@@ -35,22 +35,33 @@ if ($action === 'dry-run' && $method === 'GET') {
     if (empty($remotePath)) $remotePath = '/';
 
     $port = !empty($server['port']) ? $server['port'] : 21;
-    $conn = @ftp_connect($server['host'], $port, 5);
-    if (!$conn) {
-        jsonResponse(['error' => 'FTP Connection failed to host ' . $server['host']], 500);
-    }
+    
+    // Use cURL instead of native ftp_ functions because it properly handles FTPS with self-signed certs
+    $testUrl = 'ftp://' . $server['host'] . ':' . $port . rtrim($remotePath, '/') . '/';
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $testUrl);
+    curl_setopt($ch, CURLOPT_USERPWD, $server['username'] . ':' . ($server['password'] ?? ''));
+    
+    // Force explicit FTPS but ignore self-signed certificate errors
+    curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    
+    // Just fetch directory listing to verify auth and path
+    curl_setopt($ch, CURLOPT_DIRLISTONLY, true);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    // 15 seconds mostly because some servers have 10-second DNS lookup delays on login
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    
+    $result = curl_exec($ch);
+    $curl_error = curl_error($ch);
+    $curl_errno = curl_errno($ch);
+    curl_close($ch);
 
-    $login = @ftp_login($conn, $server['username'], $server['password'] ?? '');
-    if (!$login) {
-        @ftp_close($conn);
-        jsonResponse(['error' => 'FTP Authentication failed for user ' . $server['username']], 401);
+    if ($curl_errno !== 0) {
+        jsonResponse(['error' => 'FTP Error: ' . $curl_error], 500);
     }
-
-    if (!@ftp_chdir($conn, $remotePath)) {
-        @ftp_close($conn);
-        jsonResponse(['error' => 'Remote path does not exist on server: ' . $remotePath], 404);
-    }
-    @ftp_close($conn);
 
     $ignoreList = isset($project['ignore_list']) ? $project['ignore_list'] : [];
 
@@ -130,14 +141,24 @@ if ($action === 'dry-run' && $method === 'GET') {
     $port = !empty($server['port']) ? $server['port'] : 21;
     $ftpUrl = 'ftp://' . $server['host'] . ':' . $port . $remoteBase;
 
-    // We will use CURLOPT_USERPWD instead of placing it in URL to avoid URL encoding issues with special chars
     $credentials = $server['username'] . ':' . ($server['password'] ?? '');
-
-    $mh = curl_multi_init();
-    $curlHandles = [];
-    $fileHandles = [];
-
+    
+    // We will use CURLOPT_USERPWD instead of placing it in URL to avoid URL encoding issues with special chars
+    $ch = curl_init();
     $startTime = microtime(true);
+    
+    // Set baseline options for connection reuse
+    curl_setopt($ch, CURLOPT_USERPWD, $credentials);
+    curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
+    curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_UPLOAD, 1);
+
+    $successList = [];
+    $failedList = [];
+    $fullState = $stateStore->read();
+    if (!isset($fullState[$projectId])) $fullState[$projectId] = [];
 
     foreach ($files as $file) {
         $filePath = ltrim($file['path'], '/\\');
@@ -146,71 +167,29 @@ if ($action === 'dry-run' && $method === 'GET') {
         if (!file_exists($localFile)) continue;
 
         $remoteFileUrl = rtrim($ftpUrl, '/') . '/' . str_replace('\\', '/', $filePath);
-
-        $ch = curl_init();
         $fp = fopen($localFile, 'r');
-        $fileHandles[$filePath] = $fp;
 
         curl_setopt($ch, CURLOPT_URL, $remoteFileUrl);
-        curl_setopt($ch, CURLOPT_USERPWD, $credentials);
-        curl_setopt($ch, CURLOPT_UPLOAD, 1);
         curl_setopt($ch, CURLOPT_INFILE, $fp);
         curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localFile));
-        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
 
         // Ensure proper transfer mode
         $ext = pathinfo($localFile, PATHINFO_EXTENSION);
         $asciiExts = ['txt', 'html', 'css', 'js', 'json', 'php', 'md', 'xml'];
         if (in_array(strtolower($ext), $asciiExts)) {
             curl_setopt($ch, CURLOPT_TRANSFERTEXT, true);
+        } else {
+            curl_setopt($ch, CURLOPT_TRANSFERTEXT, false);
         }
 
-        curl_multi_add_handle($mh, $ch);
-        $curlHandles[$filePath] = $ch;
-    }
-
-    // Execute all queries simultaneously
-    $running = null;
-    do {
-        curl_multi_exec($mh, $running);
-        curl_multi_select($mh);
-    } while ($running > 0);
-
-    $multiResults = [];
-    while ($info = curl_multi_info_read($mh)) {
-        if ($info['msg'] == CURLMSG_DONE) {
-            $multiResults[(int)$info['handle']] = $info['result'];
-        }
-    }
-
-    $successList = [];
-    $failedList = [];
-
-    $fullState = $stateStore->read();
-    if (!isset($fullState[$projectId])) $fullState[$projectId] = [];
-
-    foreach ($curlHandles as $filePath => $ch) {
-        $info = curl_getinfo($ch);
+        $result = curl_exec($ch);
         $error = curl_error($ch);
-        $resultCode = isset($multiResults[(int)$ch]) ? $multiResults[(int)$ch] : -1;
+        fclose($fp);
 
-        // FTP success is usually indicated by an empty error string and/or a valid code (226=Closing data connection. Requested file action successful)
-        // cURL translates success code into 0 for curl_errno, or specific HTTP codes. For FTP over cURL, 0 error means success.
-
-        // Let's use curl_errno() logic securely
-        if ($resultCode === CURLE_OK) {
+        if ($result !== false) {
             $successList[] = $filePath;
-
-            // Find hash mapping
-            $fileHash = '';
-            foreach ($files as $f) {
-                if (ltrim($f['path'], '/\\') === $filePath) {
-                    $fileHash = $f['hash'];
-                    break;
-                }
-            }
             $fullState[$projectId][$filePath] = [
-                'hash' => $fileHash,
+                'hash' => $file['hash'],
                 'uploaded_at' => date('c')
             ];
         } else {
@@ -219,16 +198,9 @@ if ($action === 'dry-run' && $method === 'GET') {
                 'error' => $error ?: 'Unknown cURL error'
             ];
         }
-
-        curl_multi_remove_handle($mh, $ch);
-        curl_close($ch);
     }
-
-    curl_multi_close($mh);
-
-    foreach ($fileHandles as $fp) {
-        if (is_resource($fp)) fclose($fp);
-    }
+    
+    curl_close($ch);
 
     $stateStore->write($fullState);
 
@@ -266,6 +238,75 @@ if ($action === 'dry-run' && $method === 'GET') {
     }
 
     jsonResponse($responsePayload);
+} elseif ($action === 'mark_all_deployed' && $method === 'POST') {
+    // Mark all local files as "deployed" in state without uploading them
+    $input = json_decode(file_get_contents('php://input'), true);
+    $projectId = isset($input['project_id']) ? $input['project_id'] : '';
+
+    if (empty($projectId)) {
+        jsonResponse(['error' => 'project_id is required'], 400);
+    }
+
+    $project = $projectStore->getById($projectId);
+    if (!$project) {
+        jsonResponse(['error' => 'Project not found'], 404);
+    }
+
+    $localPath = rtrim($project['local_path'], '/\\');
+    if (!is_dir($localPath)) {
+        jsonResponse(['error' => 'Local path does not exist: ' . $localPath], 400);
+    }
+
+    $ignoreList = isset($project['ignore_list']) ? $project['ignore_list'] : [];
+
+    $fullState = $stateStore->read();
+    if (!isset($fullState[$projectId])) $fullState[$projectId] = [];
+
+    $markedCount = 0;
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($localPath, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($iterator as $item) {
+        if ($item->isDir()) continue;
+
+        $filePath = $item->getPathname();
+        $relativePath = ltrim(substr($filePath, strlen($localPath)), '/\\');
+
+        // Apply ignore list
+        $ignore = false;
+        foreach ($ignoreList as $ignoredItem) {
+            $ignoredItem = trim($ignoredItem);
+            if (empty($ignoredItem)) continue;
+            if (
+                $relativePath === $ignoredItem ||
+                strpos($relativePath, $ignoredItem . '/') === 0 ||
+                basename($relativePath) === $ignoredItem ||
+                strpos($relativePath, '/' . $ignoredItem . '/') !== false
+            ) {
+                $ignore = true;
+                break;
+            }
+        }
+
+        if ($ignore) continue;
+
+        $hash = md5_file($filePath);
+        $fullState[$projectId][$relativePath] = [
+            'hash' => $hash,
+            'uploaded_at' => date('c')
+        ];
+        $markedCount++;
+    }
+
+    $stateStore->write($fullState);
+
+    jsonResponse([
+        'success' => true,
+        'marked_count' => $markedCount,
+        'message' => "Marked {$markedCount} files as deployed in local state."
+    ]);
 } else {
     jsonResponse(['error' => 'Invalid action'], 400);
 }

@@ -85,20 +85,28 @@ if ($action === 'dry-run' && $method === 'GET') {
         $verifyKey = $serverId . '_' . $remotePath;
         if (!isset($verifiedServers[$verifyKey])) {
             $port = !empty($server['port']) ? $server['port'] : 21;
-            $conn = @ftp_connect($server['host'], $port, 5);
-            if (!$conn) {
-                jsonResponse(['error' => 'FTP Connection failed to host ' . $server['host'] . ' (' . $project['name'] . ')'], 500);
+            
+            $testUrl = 'ftp://' . $server['host'] . ':' . $port . rtrim($remotePath, '/') . '/';
+            
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $testUrl);
+            curl_setopt($ch, CURLOPT_USERPWD, $server['username'] . ':' . ($server['password'] ?? ''));
+            curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($ch, CURLOPT_DIRLISTONLY, true);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+            
+            curl_exec($ch);
+            $curl_errno = curl_errno($ch);
+            $curl_error = curl_error($ch);
+            curl_close($ch);
+            
+            if ($curl_errno !== 0) {
+                jsonResponse(['error' => 'FTP Error on server ' . $server['host'] . ' (' . $project['name'] . '): ' . $curl_error], 500);
             }
-            $login = @ftp_login($conn, $server['username'], $server['password'] ?? '');
-            if (!$login) {
-                @ftp_close($conn);
-                jsonResponse(['error' => 'FTP Authentication failed for host ' . $server['host']], 401);
-            }
-            if (!@ftp_chdir($conn, $remotePath)) {
-                @ftp_close($conn);
-                jsonResponse(['error' => 'Remote path does not exist on server ' . $server['host'] . ': ' . $remotePath], 404);
-            }
-            @ftp_close($conn);
+            
             $verifiedServers[$verifyKey] = true;
         }
 
@@ -159,21 +167,35 @@ if ($action === 'dry-run' && $method === 'GET') {
 
     $localBase = rtrim($localPathStr, '/\\');
 
-    $mh = curl_multi_init();
-    $curlHandles = [];
-    $fileHandles = [];
+    $serverHandles = [];
 
     $startTime = microtime(true);
+    $results = [];
+    $serverStats = [];
+    $fullState = $stateStore->read();
 
     foreach ($queue as $index => $qItem) {
         $sId = $qItem['server_id'];
         $server = isset($serverMeta[$sId]) ? $serverMeta[$sId] : null;
         if (!$server) continue;
-
+        
+        $pId = $qItem['project_id'];
         $filePath = ltrim($qItem['file']['path'], '/\\');
         $localFile = $localBase . DIRECTORY_SEPARATOR . $filePath;
 
-        if (!file_exists($localFile)) continue;
+        if (!isset($fullState[$pId])) $fullState[$pId] = [];
+        if (!isset($serverStats[$sId])) $serverStats[$sId] = ['success' => 0, 'failed' => 0];
+
+        if (!file_exists($localFile)) {
+            $results[] = [
+                'status' => 'failed',
+                'project_name' => $qItem['project_name'],
+                'path' => $filePath,
+                'error' => 'Local file not found'
+            ];
+            $serverStats[$sId]['failed']++;
+            continue;
+        }
 
         $remoteBase = rtrim($qItem['remote_path'], '/');
         if (empty($remoteBase)) $remoteBase = '/';
@@ -182,68 +204,38 @@ if ($action === 'dry-run' && $method === 'GET') {
         $ftpUrl = 'ftp://' . $server['host'] . ':' . $port . $remoteBase;
         $remoteFileUrl = rtrim($ftpUrl, '/') . '/' . str_replace('\\', '/', $filePath);
 
-        $credentials = $server['username'] . ':' . ($server['password'] ?? '');
+        // Fetch or create persistent connection handle for this specific server
+        if (!isset($serverHandles[$sId])) {
+            $ch = curl_init();
+            $credentials = $server['username'] . ':' . ($server['password'] ?? '');
+            curl_setopt($ch, CURLOPT_USERPWD, $credentials);
+            curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
+            curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($ch, CURLOPT_UPLOAD, 1);
+            $serverHandles[$sId] = $ch;
+        }
+        $ch = $serverHandles[$sId];
 
-        $ch = curl_init();
         $fp = fopen($localFile, 'r');
-        $fileHandles[$index] = $fp; // keep handle reference so it's not closed during transfer
-
         curl_setopt($ch, CURLOPT_URL, $remoteFileUrl);
-        curl_setopt($ch, CURLOPT_USERPWD, $credentials);
-        curl_setopt($ch, CURLOPT_UPLOAD, 1);
         curl_setopt($ch, CURLOPT_INFILE, $fp);
         curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localFile));
-        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
 
-        // Ensure proper transfer mode
         $ext = pathinfo($localFile, PATHINFO_EXTENSION);
         $asciiExts = ['txt', 'html', 'css', 'js', 'json', 'php', 'md', 'xml'];
         if (in_array(strtolower($ext), $asciiExts)) {
             curl_setopt($ch, CURLOPT_TRANSFERTEXT, true);
+        } else {
+            curl_setopt($ch, CURLOPT_TRANSFERTEXT, false);
         }
 
-        curl_multi_add_handle($mh, $ch);
-
-        $curlHandles[$index] = [
-            'ch' => $ch,
-            'qItem' => $qItem
-        ];
-    }
-
-    // Execute concurrently (cap is handled by JS slicing chunks size max 10-15)
-    $running = null;
-    do {
-        curl_multi_exec($mh, $running);
-        curl_multi_select($mh);
-    } while ($running > 0);
-
-    $multiResults = [];
-    while ($info = curl_multi_info_read($mh)) {
-        if ($info['msg'] == CURLMSG_DONE) {
-            $multiResults[(int)$info['handle']] = $info['result'];
-        }
-    }
-
-    $results = [];
-    $serverStats = [];
-
-    $fullState = $stateStore->read();
-
-    foreach ($curlHandles as $index => $handleData) {
-        $ch = $handleData['ch'];
-        $qItem = $handleData['qItem'];
-        $pId = $qItem['project_id'];
-        $sId = $qItem['server_id'];
-        $filePath = $qItem['file']['path'];
-        $fileHash = $qItem['file']['hash'];
-
-        if (!isset($fullState[$pId])) $fullState[$pId] = [];
-        if (!isset($serverStats[$sId])) $serverStats[$sId] = ['success' => 0, 'failed' => 0];
-
-        $resultCode = isset($multiResults[(int)$ch]) ? $multiResults[(int)$ch] : -1;
+        $result = curl_exec($ch);
         $error = curl_error($ch);
+        fclose($fp);
 
-        if ($resultCode === CURLE_OK) {
+        if ($result !== false) {
             $results[] = [
                 'status' => 'success',
                 'project_name' => $qItem['project_name'],
@@ -252,7 +244,7 @@ if ($action === 'dry-run' && $method === 'GET') {
             $serverStats[$sId]['success']++;
 
             $fullState[$pId][$filePath] = [
-                'hash' => $fileHash,
+                'hash' => $qItem['file']['hash'],
                 'uploaded_at' => date('c')
             ];
         } else {
@@ -264,15 +256,11 @@ if ($action === 'dry-run' && $method === 'GET') {
             ];
             $serverStats[$sId]['failed']++;
         }
-
-        curl_multi_remove_handle($mh, $ch);
-        curl_close($ch);
     }
 
-    curl_multi_close($mh);
-
-    foreach ($fileHandles as $fp) {
-        if (is_resource($fp)) fclose($fp);
+    // Close all persistent server handles
+    foreach ($serverHandles as $ch) {
+        curl_close($ch);
     }
 
     $stateStore->write($fullState);

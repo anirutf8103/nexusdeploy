@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const projectMeta = document.getElementById('projectMeta');
     const btnAnalyze = document.getElementById('btnAnalyze');
     const btnDeploy = document.getElementById('btnDeploy');
+    const btnMarkBaseline = document.getElementById('btnMarkBaseline');
     const deployBadge = document.getElementById('deployStatusBadge');
 
     // UI Elements
@@ -66,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!id) {
             projectMeta.classList.add('hidden');
             btnAnalyze.disabled = true;
+            btnMarkBaseline.disabled = true;
             btnDeploy.disabled = true;
             selectedProject = null;
             return;
@@ -80,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         projectMeta.classList.remove('hidden');
         btnAnalyze.disabled = false;
+        btnMarkBaseline.disabled = false;
 
         if (selectedProject.webhook_url) {
             webhookUrlDisplay.innerText = selectedProject.webhook_url;
@@ -93,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!srv) {
             printTerm('WARNING: Selected project has no server mapped. Deployment will fail.', 'warn');
             btnAnalyze.disabled = true;
+            btnMarkBaseline.disabled = true;
         } else {
             printTerm(`Project mapped: ${selectedProject.name} -> ${srv.host}`);
         }
@@ -274,6 +278,47 @@ document.addEventListener('DOMContentLoaded', () => {
             btnAnalyze.disabled = false;
             btnDeploy.disabled = true; // wait for re-analysis
         }, 5000);
+    });
+
+    // ── Mark All as Baseline ──────────────────────────────────────────────────
+    btnMarkBaseline.addEventListener('click', async () => {
+        if (!selectedProject || isDeploying) return;
+
+        const confirmed = confirm(
+            `⚠️  Mark All as Baseline\n\nThis will record all ${selectedProject.name} files as already deployed in local state.\n\nNext "Analyze Changes" will ONLY show files modified after this point.\n\nNo files will be uploaded to the server.\n\nContinue?`
+        );
+        if (!confirmed) return;
+
+        btnMarkBaseline.disabled = true;
+        btnMarkBaseline.innerHTML = '<i class="ph ph-spinner animate-spin"></i> Marking...';
+        printTerm(`Marking all files as baseline for "${selectedProject.name}"...`, 'warn');
+
+        try {
+            const res = await fetch('api/deploy.php?action=mark_all_deployed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: selectedProject.id })
+            });
+            const data = await res.json();
+
+            if (data.error) {
+                printTerm(`ERROR: ${data.error}`, 'error');
+            } else {
+                printTerm(`✔ Baseline set. ${data.marked_count} files recorded as deployed.`, 'success');
+                printTerm(`From now on, only files you modify will appear in dry run.`, 'success');
+
+                // Reset the file list to reflect clean state
+                filesToUpload = [];
+                changesCount.innerText = '0';
+                changesList.innerHTML = '<tr><td class="text-center py-10 text-gray-500 font-mono text-xs"><i class="ph ph-check-circle text-green-500 block text-2xl mb-2"></i>Baseline set — run "Analyze Changes" to verify</td></tr>';
+                btnDeploy.disabled = true;
+            }
+        } catch (e) {
+            printTerm(`Network error during baseline marking`, 'error');
+        }
+
+        btnMarkBaseline.innerHTML = '<i class="ph ph-check-square"></i> Mark All as Baseline';
+        btnMarkBaseline.disabled = false;
     });
 
     loadData();

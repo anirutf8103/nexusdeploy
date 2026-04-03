@@ -202,43 +202,27 @@ if ($action === 'dry-run' && $method === 'GET') {
         $ftpUrl = 'ftp://' . $server['host'] . ':' . $port . $remoteBase;
         $remoteFileUrl = rtrim($ftpUrl, '/') . '/' . str_replace('\\', '/', $filePath);
 
-        $fp = fopen($localFile, 'r');
+        $fp = fopen($localFile, 'rb');
         if (!$fp) {
             $results[] = ['status' => 'failed', 'project_name' => $qItem['project_name'], 'path' => $filePath, 'error' => 'Could not open local file'];
             $serverStats[$sId]['failed']++;
             continue;
         }
 
-        $ch = curl_init();
+        // ATOMIC OS BRIDGE FIX: Bypassing unstable PHP libcurl extensions in XAMPP Mac
         $credentials = $server['username'] . ':' . ($server['password'] ?? '');
-        curl_setopt($ch, CURLOPT_URL, $remoteFileUrl);
-        curl_setopt($ch, CURLOPT_USERPWD, $credentials);
-        curl_setopt($ch, CURLOPT_UPLOAD, 1);
-        curl_setopt($ch, CURLOPT_INFILE, $fp);
-        curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localFile));
-        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
-        
-        // Secure FTPS settings
-        curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        $cmd = sprintf(
+            '/usr/bin/curl -s -m 60 --ftp-create-dirs -u %s --ssl-reqd -k -T %s %s 2>&1',
+            escapeshellarg($credentials),
+            escapeshellarg($localFile),
+            escapeshellarg($remoteFileUrl)
+        );
 
-        $ext = pathinfo($localFile, PATHINFO_EXTENSION);
-        $asciiExts = ['txt', 'html', 'css', 'js', 'json', 'php', 'md', 'xml'];
-        if (in_array(strtolower($ext), $asciiExts)) {
-            curl_setopt($ch, CURLOPT_TRANSFERTEXT, true);
-        } else {
-            curl_setopt($ch, CURLOPT_TRANSFERTEXT, false);
-        }
+        $output = [];
+        $returnCode = -1;
+        exec($cmd, $output, $returnCode);
 
-        $result = curl_exec($ch);
-        $error = curl_error($ch);
-        
-        fclose($fp);
-        curl_close($ch);
-
-        if ($result !== false) {
+        if ($returnCode === 0) {
             $results[] = [
                 'status' => 'success',
                 'project_name' => $qItem['project_name'],
@@ -251,14 +235,21 @@ if ($action === 'dry-run' && $method === 'GET') {
                 'uploaded_at' => date('c')
             ];
         } else {
+            $errorLog = implode(" ", $output);
             $results[] = [
                 'status' => 'failed',
                 'project_name' => $qItem['project_name'],
                 'path' => $filePath,
-                'error' => $error ?: 'Unknown cURL error'
+                'error' => "cURL OS Failure: " . ($errorLog ?: "Code $returnCode")
             ];
             $serverStats[$sId]['failed']++;
+            
+            // Log full output for diagnostics
+            $logMsg = date('[Y-m-d H:i:s]') . " GROUP ATOMIC OS UPLOAD FAILED: $filePath | $errorLog\n";
+            file_put_contents(__DIR__ . '/../data/deploy_debug.log', $logMsg, FILE_APPEND);
         }
+
+        fclose($fp);
     }
 
     $stateStore->write($fullState);

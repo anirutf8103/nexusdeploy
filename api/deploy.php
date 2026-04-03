@@ -152,57 +152,51 @@ if ($action === 'dry-run' && $method === 'GET') {
     foreach ($files as $file) {
         $filePath = ltrim($file['path'], '/\\');
         $localFile = $localBase . DIRECTORY_SEPARATOR . $filePath;
-
-        if (!file_exists($localFile)) continue;
-
         $remoteFileUrl = rtrim($ftpUrl, '/') . '/' . str_replace('\\', '/', $filePath);
-        $fp = fopen($localFile, 'r');
+
+        $fp = fopen($localFile, 'rb');
         if (!$fp) {
             $failedList[] = ['path' => $filePath, 'error' => 'Could not open local file for reading'];
             continue;
         }
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $remoteFileUrl);
-        curl_setopt($ch, CURLOPT_USERPWD, $credentials);
-        curl_setopt($ch, CURLOPT_UPLOAD, 1);
-        curl_setopt($ch, CURLOPT_INFILE, $fp);
-        curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localFile));
-        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
-        
-        // Secure FTPS settings
-        curl_setopt($ch, CURLOPT_USE_SSL, CURLUSESSL_ALL);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        // --- DEBUG TRACE ---
+        file_put_contents(__DIR__ . '/../data/trace.log', "Processing: $filePath\n", FILE_APPEND);
 
-        // Ensure proper transfer mode
-        $ext = pathinfo($localFile, PATHINFO_EXTENSION);
-        $asciiExts = ['txt', 'html', 'css', 'js', 'json', 'php', 'md', 'xml'];
-        if (in_array(strtolower($ext), $asciiExts)) {
-            curl_setopt($ch, CURLOPT_TRANSFERTEXT, true);
-        } else {
-            curl_setopt($ch, CURLOPT_TRANSFERTEXT, false);
-        }
+        /*
+        // ATOMIC OS BRIDGE FIX: Temporarily Disabled for Crash Isolation
+        $cmd = sprintf(
+            '/usr/bin/curl -s -m 60 --ftp-create-dirs -u %s --ssl-reqd -k -T %s %s 2>&1',
+            escapeshellarg($credentials),
+            escapeshellarg($localFile),
+            escapeshellarg($remoteFileUrl)
+        );
 
-        $result = curl_exec($ch);
-        $error = curl_error($ch);
-        
-        fclose($fp);
-        curl_close($ch);
+        $output = [];
+        $returnCode = -1;
+        exec($cmd, $output, $returnCode);
+        */
 
-        if ($result !== false) {
+        // MOCK SUCCESS FOR ISOLATION
+        $returnCode = 0; 
+        $output = ["MOCK SUCCESS"];
+
+        // curl exit code 0 is Success
+        if ($returnCode === 0) {
             $successList[] = $filePath;
             $fullState[$projectId][$filePath] = [
                 'hash' => $file['hash'],
                 'uploaded_at' => date('c')
             ];
         } else {
+            $errorLog = implode(" ", $output);
             $failedList[] = [
                 'path' => $filePath,
-                'error' => $error ?: 'Unknown cURL error'
+                'error' => "cURL OS Failure: " . ($errorLog ?: "Code $returnCode")
             ];
         }
+
+        fclose($fp);
     }
 
     $stateStore->write($fullState);

@@ -19,19 +19,33 @@ if (empty($host) || empty($username)) {
 // Suppress warnings for FTP connection to handle errors manually
 error_reporting(0);
 
-$conn = ftp_connect($host, $port, 10);
+$username = trim($username);
+
+$conn = @ftp_connect($host, $port, 15);
+if (!$conn && function_exists('ftp_ssl_connect')) {
+    $conn = @ftp_ssl_connect($host, $port, 15);
+}
+
 if (!$conn) {
     jsonResponse(['success' => false, 'message' => 'Could not connect to host ' . $host]);
 }
 
-$login = ftp_login($conn, $username, $password);
+$login = @ftp_login($conn, $username, $password);
+if (!$login && function_exists('ftp_ssl_connect')) {
+    @ftp_close($conn);
+    $conn = @ftp_ssl_connect($host, $port, 15);
+    if ($conn) {
+        $login = @ftp_login($conn, $username, $password);
+    }
+}
+
 if (!$login) {
-    ftp_close($conn);
+    if ($conn) @ftp_close($conn);
     jsonResponse(['success' => false, 'message' => 'FTP login failed for user ' . $username]);
 }
 
 // Enable passive mode
-ftp_pasv($conn, true);
+@ftp_pasv($conn, true);
 
 ftp_close($conn);
 

@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const changesTitle = document.getElementById('changesTitle');
     const changesCount = document.getElementById('changesCount');
     const changesList = document.getElementById('changesList');
+    const btnMarkSynced = document.getElementById('btnMarkSynced');
 
     // Webhook Elements
     const webhookContainer = document.getElementById('webhookContainer');
@@ -63,6 +64,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     projectSelect.addEventListener('change', (e) => {
         const id = e.target.value;
+        if (btnMarkSynced) {
+            btnMarkSynced.classList.add('hidden');
+            btnMarkSynced.disabled = true;
+        }
+
         if (!id) {
             projectMeta.classList.add('hidden');
             btnAnalyze.disabled = true;
@@ -107,6 +113,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!selectedProject || isDeploying) return;
 
         btnAnalyze.disabled = true;
+        if (btnMarkSynced) {
+            btnMarkSynced.classList.add('hidden');
+            btnMarkSynced.disabled = true;
+        }
         btnAnalyze.innerHTML = '<i class="ph ph-spinner animate-spin"></i> Analyzing...';
         printTerm(`Starting dry run for ${selectedProject.local_path}...`, 'cyan');
 
@@ -129,6 +139,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 printTerm('Dry run complete. No changes detected. System is up-to-date.', 'success');
                 changesList.innerHTML = '<tr><td class="text-center py-10 text-gray-500 font-mono text-xs"><i class="ph ph-check-circle text-green-500 block text-2xl mb-2"></i> All files up to date</td></tr>';
                 btnDeploy.disabled = true;
+                if (btnMarkSynced) {
+                    btnMarkSynced.classList.add('hidden');
+                    btnMarkSynced.disabled = true;
+                }
             } else {
                 printTerm(`Dry run complete. ${filesToUpload.length} files modified or new.`, 'warn');
                 filesToUpload.forEach(f => {
@@ -144,6 +158,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     changesList.appendChild(tr);
                 });
                 btnDeploy.disabled = false;
+                if (btnMarkSynced) {
+                    btnMarkSynced.classList.remove('hidden');
+                    btnMarkSynced.disabled = false;
+                }
             }
 
         } catch (error) {
@@ -154,6 +172,52 @@ document.addEventListener('DOMContentLoaded', () => {
         btnAnalyze.disabled = false;
     });
 
+    if (btnMarkSynced) {
+        btnMarkSynced.addEventListener('click', async () => {
+            if (!selectedProject || filesToUpload.length === 0 || isDeploying) return;
+
+            const count = filesToUpload.length;
+            if (!confirm(`ยืนยันการทำเครื่องหมายไฟล์ทั้งหมด (${count} ไฟล์) ว่าเสร็จสิ้นแล้ว โดยไม่ทำการอัปโหลดจริงใช่หรือไม่?`)) {
+                return;
+            }
+
+            btnMarkSynced.disabled = true;
+            btnMarkSynced.innerHTML = '<i class="ph ph-spinner animate-spin text-sm"></i> Marking...';
+            printTerm(`Marking ${count} files as synced (skipping upload)...`, 'cyan');
+
+            try {
+                const res = await fetch('api/deploy.php?action=mark_synced', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: selectedProject.id,
+                        files: filesToUpload
+                    })
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    printTerm(`Mark Synced Error: ${data.error}`, 'error');
+                    btnMarkSynced.innerHTML = '<i class="ph ph-check-square-offset text-sm"></i> Mark as Synced (Skip Upload)';
+                    btnMarkSynced.disabled = false;
+                    return;
+                }
+
+                printTerm(`Success: ${data.marked_count} files marked as synced in local state database.`, 'success');
+                filesToUpload = [];
+                changesCount.innerText = '0';
+                changesList.innerHTML = '<tr><td class="text-center py-10 text-gray-500 font-mono text-xs"><i class="ph ph-check-circle text-green-500 block text-2xl mb-2"></i> All files marked as synced</td></tr>';
+                btnDeploy.disabled = true;
+                btnMarkSynced.classList.add('hidden');
+                btnMarkSynced.innerHTML = '<i class="ph ph-check-square-offset text-sm"></i> Mark as Synced (Skip Upload)';
+            } catch (err) {
+                printTerm('Network Error during mark synced operation', 'error');
+                btnMarkSynced.innerHTML = '<i class="ph ph-check-square-offset text-sm"></i> Mark as Synced (Skip Upload)';
+                btnMarkSynced.disabled = false;
+            }
+        });
+    }
+
     btnDeploy.addEventListener('click', async () => {
         if (!selectedProject || filesToUpload.length === 0 || isDeploying) return;
 
@@ -161,6 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnDeploy.disabled = true;
         btnAnalyze.disabled = true;
         projectSelect.disabled = true;
+        if (btnMarkSynced) btnMarkSynced.disabled = true;
 
         btnDeploy.innerHTML = '<i class="ph ph-spinner-gap animate-spin text-xl"></i> DEPLOYING...';
         deployBadge.className = 'bg-blue-500/20 text-blue-400 text-xs font-medium px-2.5 py-0.5 rounded border border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)] animate-pulse';

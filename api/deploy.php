@@ -35,16 +35,34 @@ if ($action === 'dry-run' && $method === 'GET') {
     if (empty($remotePath)) $remotePath = '/';
 
     $port = !empty($server['port']) ? $server['port'] : 21;
-    $conn = @ftp_connect($server['host'], $port, 5);
+    $timeout = 15;
+    $username = trim($server['username']);
+    $password = $server['password'] ?? '';
+
+    $conn = @ftp_connect($server['host'], $port, $timeout);
+    if (!$conn && function_exists('ftp_ssl_connect')) {
+        $conn = @ftp_ssl_connect($server['host'], $port, $timeout);
+    }
+
     if (!$conn) {
         jsonResponse(['error' => 'FTP Connection failed to host ' . $server['host']], 500);
     }
 
-    $login = @ftp_login($conn, $server['username'], $server['password'] ?? '');
-    if (!$login) {
+    $login = @ftp_login($conn, $username, $password);
+    if (!$login && function_exists('ftp_ssl_connect')) {
         @ftp_close($conn);
-        jsonResponse(['error' => 'FTP Authentication failed for user ' . $server['username']], 401);
+        $conn = @ftp_ssl_connect($server['host'], $port, $timeout);
+        if ($conn) {
+            $login = @ftp_login($conn, $username, $password);
+        }
     }
+
+    if (!$login) {
+        if ($conn) @ftp_close($conn);
+        jsonResponse(['error' => 'FTP Authentication failed for user ' . $username], 401);
+    }
+
+    @ftp_pasv($conn, true);
 
     if (!@ftp_chdir($conn, $remotePath)) {
         @ftp_close($conn);
@@ -266,6 +284,78 @@ if ($action === 'dry-run' && $method === 'GET') {
     }
 
     jsonResponse($responsePayload);
+} elseif ($action === 'mark_synced' && $method === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $projectId = isset($input['project_id']) ? $input['project_id'] : '';
+
+    $project = $projectStore->getById($projectId);
+    if (!$project) jsonResponse(['error' => 'Project not found'], 404);
+
+    $localPath = rtrim($project['local_path'], '/\\');
+    if (!is_dir($localPath)) jsonResponse(['error' => 'Local path does not exist: ' . $localPath], 400);
+
+    $ignoreList = isset($project['ignore_list']) ? $project['ignore_list'] : [];
+
+    $fullState = $stateStore->read();
+    if (!isset($fullState[$projectId])) $fullState[$projectId] = [];
+
+    $filesToMark = [];
+    if (!empty($input['files']) && is_array($input['files'])) {
+        $filesToMark = $input['files'];
+    } else {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($localPath, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $item) {
+            if ($item->isDir()) continue;
+            $filePath = $item->getPathname();
+            $relativePath = ltrim(substr($filePath, strlen($localPath)), '/\\');
+
+            $ignore = false;
+            foreach ($ignoreList as $ignoredItem) {
+                $ignoredItem = trim($ignoredItem);
+                if (empty($ignoredItem)) continue;
+                if (
+                    $relativePath === $ignoredItem ||
+                    strpos($relativePath, $ignoredItem . '/') === 0 ||
+                    basename($relativePath) === $ignoredItem ||
+                    strpos($relativePath, '/' . $ignoredItem . '/') !== false
+                ) {
+                    $ignore = true;
+                    break;
+                }
+            }
+            if ($ignore) continue;
+
+            $filesToMark[] = [
+                'path' => $relativePath,
+                'hash' => md5_file($filePath)
+            ];
+        }
+    }
+
+    $markedCount = 0;
+    foreach ($filesToMark as $f) {
+        $filePath = ltrim($f['path'], '/\\');
+        $fileHash = isset($f['hash']) ? $f['hash'] : '';
+        if (empty($fileHash)) {
+            $fullPath = $localPath . DIRECTORY_SEPARATOR . $filePath;
+            if (file_exists($fullPath)) {
+                $fileHash = md5_file($fullPath);
+            }
+        }
+
+        $fullState[$projectId][$filePath] = [
+            'hash' => $fileHash,
+            'uploaded_at' => date('c')
+        ];
+        $markedCount++;
+    }
+
+    $stateStore->write($fullState);
+
+    jsonResponse(['success' => true, 'marked_count' => $markedCount]);
 } else {
     jsonResponse(['error' => 'Invalid action'], 400);
 }

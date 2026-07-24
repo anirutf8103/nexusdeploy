@@ -85,15 +85,35 @@ if ($action === 'dry-run' && $method === 'GET') {
         $verifyKey = $serverId . '_' . $remotePath;
         if (!isset($verifiedServers[$verifyKey])) {
             $port = !empty($server['port']) ? $server['port'] : 21;
-            $conn = @ftp_connect($server['host'], $port, 5);
+            $timeout = 15;
+            $username = trim($server['username']);
+            $password = $server['password'] ?? '';
+
+            $conn = @ftp_connect($server['host'], $port, $timeout);
+            if (!$conn && function_exists('ftp_ssl_connect')) {
+                $conn = @ftp_ssl_connect($server['host'], $port, $timeout);
+            }
+
             if (!$conn) {
                 jsonResponse(['error' => 'FTP Connection failed to host ' . $server['host'] . ' (' . $project['name'] . ')'], 500);
             }
-            $login = @ftp_login($conn, $server['username'], $server['password'] ?? '');
-            if (!$login) {
+
+            $login = @ftp_login($conn, $username, $password);
+            if (!$login && function_exists('ftp_ssl_connect')) {
                 @ftp_close($conn);
+                $conn = @ftp_ssl_connect($server['host'], $port, $timeout);
+                if ($conn) {
+                    $login = @ftp_login($conn, $username, $password);
+                }
+            }
+
+            if (!$login) {
+                if ($conn) @ftp_close($conn);
                 jsonResponse(['error' => 'FTP Authentication failed for host ' . $server['host']], 401);
             }
+
+            @ftp_pasv($conn, true);
+
             if (!@ftp_chdir($conn, $remotePath)) {
                 @ftp_close($conn);
                 jsonResponse(['error' => 'Remote path does not exist on server ' . $server['host'] . ': ' . $remotePath], 404);

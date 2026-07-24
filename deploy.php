@@ -57,6 +57,9 @@
         <div class="bg-dark-panel rounded-xl border border-dark-border shadow-lg overflow-hidden flex flex-col h-72">
             <div class="p-4 border-b border-dark-border flex items-center justify-between bg-gray-900/40 shrink-0">
                 <h3 class="text-white font-semibold flex items-center gap-2" id="changesTitle"><i class="ph ph-files text-primary"></i> Files to Upload <span class="bg-dark-border text-xs px-2 py-0.5 rounded text-gray-300 inline-block font-mono" id="changesCount">0</span></h3>
+                <button id="btnMarkSynced" disabled class="hidden text-xs bg-dark-bg hover:bg-emerald-950 text-emerald-400 border border-emerald-600/40 hover:border-emerald-500 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm">
+                    <i class="ph ph-check-square-offset text-sm"></i> Mark as Synced (Skip Upload)
+                </button>
             </div>
             <div class="flex-1 overflow-y-auto custom-scrollbar bg-dark-bg p-0">
                 <table class="w-full text-left text-sm text-gray-400">

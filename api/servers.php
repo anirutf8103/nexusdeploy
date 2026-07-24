@@ -17,10 +17,10 @@ if ($method === 'GET') {
         jsonResponse(['error' => 'Missing required fields'], 400);
     }
     $server = $store->add([
-        'name' => $input['name'],
-        'host' => $input['host'],
+        'name' => trim($input['name']),
+        'host' => trim($input['host']),
         'port' => isset($input['port']) ? (int)$input['port'] : 21,
-        'username' => $input['username'],
+        'username' => trim($input['username']),
         'password' => isset($input['password']) ? $input['password'] : ''
     ]);
     jsonResponse($server, 201);
@@ -29,10 +29,10 @@ if ($method === 'GET') {
     if (!isset($input['id'])) jsonResponse(['error' => 'Missing ID'], 400);
 
     $updateData = [];
-    if (isset($input['name'])) $updateData['name'] = $input['name'];
-    if (isset($input['host'])) $updateData['host'] = $input['host'];
+    if (isset($input['name'])) $updateData['name'] = trim($input['name']);
+    if (isset($input['host'])) $updateData['host'] = trim($input['host']);
     if (isset($input['port'])) $updateData['port'] = (int)$input['port'];
-    if (isset($input['username'])) $updateData['username'] = $input['username'];
+    if (isset($input['username'])) $updateData['username'] = trim($input['username']);
     if (isset($input['password'])) $updateData['password'] = $input['password'];
 
     $updated = $store->update($input['id'], $updateData);
